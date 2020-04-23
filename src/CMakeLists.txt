@@ -2,7 +2,10 @@ find_package(LLVM REQUIRED CONFIG)
 
 llvm_map_components_to_libnames(LLVM_LIBS core native)
 
-set(SOURCES "main.cpp")
+set(SOURCES "Parser.cpp"
+            "Lexer.cpp"
+            "Type.cpp"
+            "main.cpp")
 
 add_executable(pspamm ${SOURCES})
 target_compile_features(pspamm PUBLIC cxx_std_17)

@@ -19,79 +19,73 @@ public:
   PrettyPrinter(std::ostream& out)
     : out(out) {}
 
-  void operator()(Stmt& stmt) {}
+  void operator()(Stmt&) {}
+
+  void operator()(Ty const& ty) {}
+  void operator()(BasicTy const& ty) {
+    out << ty.getTyName() << ty.getNumBits() << (ty.isPtrTy() ? "*" : "");
+  }
+  void operator()(VectorTy const& ty) {
+    out << "<";
+    auto basic = ty.getBasicTy();
+    md::visit(*this, basic);
+    out << ":" << ty.getNumElements();
+    out << ">";
+  }
+
   void operator()(Variable& var) {
     out << var.getName();
   }
 
-  void operator()(Load& load) {
-    out << "Load(";
-    md::visit(*this, load.getSrc()),
-    out << ", "
-        << load.getMb() << ", "
-        << load.getNb() << ")";
+  void operator()(Number& number) {
+    out << number.getValue();
   }
 
-  void operator()(Store& store) {
-    out << indent() << "Store(";
-    md::visit(*this, store.getSrc());
-    out << ", ";
-    md::visit(*this, store.getTarget());
-    out << ")" << std::endl;
-  }
-
-  void operator()(Block& block) {
-    ++level;
-    for (auto& stmt : block.getStmts()) {
-      md::visit(*this, *stmt);
-    } 
-    --level;
-  }
-
-  void operator()(AnonymousFunction& fun) {
-    out << "function ( ";
-    for (auto& arg : fun.getArgs()) {
-      out << arg << " ";
-    }
-    out << ")" << std::endl;
-    ++level;
-    md::visit(*this, fun.getBody());
-    --level;
-  }
-
-  void operator()(Assign& assign) {
-    out << indent();
-    md::visit(*this, assign.getLHS());
-    out << " := ";
-    md::visit(*this, assign.getRHS());
-    out << std::endl;
-  }
-
-  void operator()(Incr& incr) {
-    md::visit(*this, incr.getVar());
-    out << " + " << incr.getIncr();
-  }
-
-  void operator()(Outer& outer) {
-    out << "outer(";
-    md::visit(*this, outer.getA());
-    out << ", ";
-    md::visit(*this, outer.getB());
-    out << ", ";
-    md::visit(*this, outer.getC());
+  void operator()(BinaryOp& op) {
+    out << "(";
+    md::visit(*this, op.getLHS());
+    out << " " << op.getOp() << " ";
+    md::visit(*this, op.getRHS());
     out << ")";
   }
 
-  void operator()(For& forLoop) {
-    out << indent() << "count from "
-        << forLoop.getStart()
-        << " up to "
-        << forLoop.getStop()-1
-        << " with step "
-        << forLoop.getStep() << std::endl;
+  void operator()(Block& block) {
+    out << "{" << std::endl;
     ++level;
-    md::visit(*this, forLoop.getBody());
+    for (auto& stmt : block.getStmts()) {
+      out << indent();
+      md::visit(*this, *stmt);
+      out << std::endl;
+    }
     --level;
+    out << indent() << "}";
+  }
+
+  void operator()(For& forLoop) {
+    out << "for ";
+    ++level;
+    md::visit(*this, forLoop.getStart());
+    out << ", ";
+    md::visit(*this, forLoop.getEnd());
+    out << ", ";
+    md::visit(*this, forLoop.getStep());
+    out << " ";
+    --level;
+    md::visit(*this, forLoop.getBody());
+  }
+
+  void operator()(Declaration& decl) {
+    out << "var " << decl.getName() << ": ";
+    md::visit(*this, decl.getTy());
+  }
+
+  void operator()(Call& call) {
+    out << call.getCallee() << "(";
+    for (auto& arg : call.getArgs()) {
+      md::visit(*this, *arg);
+      out << ",";
+    }
+    out << ")";
   }
 };
 

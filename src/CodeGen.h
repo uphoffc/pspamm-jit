@@ -7,6 +7,7 @@
 #include <vector>
 #include <iostream>
 #include <cassert>
+#include <optional>
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
@@ -16,7 +17,7 @@
 #include "llvm/IR/Verifier.h"
 
 #include "AST.h"
-#include "FindReadVars.h"
+#include "visitor/FindModified.h"
 
 using namespace llvm;
 
@@ -25,7 +26,8 @@ private:
   LLVMContext context;
   IRBuilder<> builder;
   std::unique_ptr<Module> module;
-  std::unordered_map<std::string, std::vector<Value*>> nv;
+  using ValueMap = std::unordered_map<std::string, Value*>;
+  std::vector<ValueMap> nv;
 
   Type* fpTy;
   Type* ptrToFpTy;
@@ -36,9 +38,16 @@ private:
     return nullptr;
   }
 
-public:
-  using return_t = std::vector<Value*>;
+  auto findNV(std::string const& name) -> std::optional<std::reference_wrapper<Value*>> {
+    for (auto it = nv.rbegin(); it != nv.rend(); ++it) {
+      if (it->find(name) != it->end()) {
+        return std::optional<std::reference_wrapper<Value*>>{(*it)[name]};
+      }
+    }
+    return std::nullopt;
+  }
 
+public:
   CodeGen()
     : builder(context),
       module(std::make_unique<Module>("my cool jit", context)),
@@ -51,73 +60,40 @@ public:
   Module& getModule() {
     return *module;
   }
-
-  return_t operator()(Stmt& stmt) {
-    return return_t{nullptr};
+  Type* operator()(Ty const& ty) {
+    return nullptr;
   }
 
-  /*
-
-  void go_steps(std::string const& name, int steps) {
-   nv[name] = builder.CreateGEP(
-        fpTy,
-        nv[name],
-        ConstantInt::get(intTy, steps),
-        "movecursor");
-  }
-
-  void far_up(Cursor& c) {
-    int steps = c.far_up();
-    go_steps(c.getName(), steps);
-  }
-
-  void far_left(Cursor& c) {
-    int steps = c.far_up();
-    go_steps(c.getName(), steps * c.rows());
-  }
-
-  void down(Cursor& c) {
-    int steps = c.down();
-    go_steps(c.getName(), steps);
-  }
-
-  void right(Cursor& c) {
-    int steps = c.right();
-    go_steps(c.getName(), steps * c.rows());
-  }
-
-  template<typename Lambda>
-  void unroll(int start, int end, int step, Lambda body, std::vector<std::string>&&) {
-    for (int i = start; i < end; i += step) {
-      body();
-    }
-  }*/
-  return_t operator()(Load& load) {
-    return_t block(load.getNb(), nullptr);
-
-    VectorType* vecTy = VectorType::get(fpTy, load.getMb());
-    PointerType* ptrToVecTy = PointerType::get(vecTy, 0);
-
-    Value* base = nv[load.getSrc().getName()][0];
-    assert(base != nullptr);
-
-    for (int n = 0; n < load.getNb(); ++n) {
-      Value* ptr = builder.CreateGEP(
-          fpTy,
-          base,
-          ConstantInt::get(intTy, n*load.getLd()),
-          "getptr");
-      Type* loadTy = fpTy;
-      if (load.getMb() > 1) {
-        ptr = builder.CreatePointerCast(ptr, ptrToVecTy, "tovecptr");
-        loadTy = vecTy;
+  Type* operator()(BasicTy const& ty) {
+    Type* type = nullptr;
+    switch (ty.getArTy()) {
+      case ArTy::Int:
+        type = IntegerType::get(context, ty.getNumBits());
+        break;
+      case ArTy::Float: {
+        switch (ty.getNumBits()) {
+          case 64:
+            type = Type::getDoubleTy(context);
+            break; 
+          case 32:
+            type = Type::getFloatTy(context);
+            break;
+          case 16:
+            type = Type::getHalfTy(context);
+            break;
+          default:
+            type = logError("Unknown floating point type");
+        }
+        break;
       }
-      block[n] = builder.CreateLoad(loadTy, ptr, "load");
     }
-    return block;
+    if (ty.isPtrTy()) {
+      return PointerType::get(type, 0);
+    }
+    return type;
   }
 
-  return_t operator()(Store& store) {
+  /*  return_t operator()(Store& store) {
     Matrix& src = store.getSrc();
 
     VectorType* vecTy = VectorType::get(fpTy, src.getMb());
@@ -174,24 +150,169 @@ public:
   return_t operator()(Incr& incr) {
     Value* var = nv[incr.getVar().getName()][0];
     return return_t{builder.CreateGEP(var, ConstantInt::get(intTy, incr.getIncr()), "movepointer")};
+  }*/
+
+  Value* operator()(Stmt&) {
+    return logError("Not implemented");
   }
 
-  return_t operator()(Assign& assign) {
-    auto v = md::visit(*this, assign.getRHS());
-    nv[assign.getLHS().getName()] = v;
+
+  Value* operator()(Call& call) {
+    if (call.getCallee() == "load") {
+      if (call.getArgs().size() != 3) {
+        return logError("Load requires three arguments");
+      }
+      Value* first = md::visit(*this, *call.getArgs()[0]);
+      Value* second = md::visit(*this, *call.getArgs()[1]);
+      Value* third = md::visit(*this, *call.getArgs()[2]);
+      auto* firstPtr = dyn_cast<PointerType>(first->getType());
+      if (!firstPtr) {
+        return logError("First argument to load must be pointer");
+      }
+      auto* thirdConst = dyn_cast<ConstantInt>(third);
+      if (!thirdConst) {
+        return logError("Third argument to load must be constant at compile time");
+      }
+
+      uint64_t vl = thirdConst->getValue().getLimitedValue();
+      Type* loadTy = firstPtr->getElementType();
+
+      Value* ptr = builder.CreateGEP(first, second, "getptr");
+      if (vl > 1) {
+        loadTy = VectorType::get(loadTy, vl);
+        PointerType* ptrToVecTy = PointerType::get(loadTy, 0);
+        ptr = builder.CreatePointerCast(ptr, ptrToVecTy, "tovecptr");
+      }
+      return builder.CreateLoad(loadTy, ptr, "load");
+    } else if (call.getCallee() == "store") {
+      if (call.getArgs().size() != 3) {
+        return logError("store requires three arguments");
+      }
+      Value* first = md::visit(*this, *call.getArgs()[0]);
+      Value* second = md::visit(*this, *call.getArgs()[1]);
+      Value* third = md::visit(*this, *call.getArgs()[2]);
+      auto* secondPtr = dyn_cast<PointerType>(second->getType());
+      if (!secondPtr) {
+        return logError("Second argument to store must be pointer");
+      }
+
+      Type* storeTy = first->getType();
+      Value* ptr = builder.CreateGEP(second, third, "getptr");
+      PointerType* ptrToVecTy = PointerType::get(storeTy, 0);
+      ptr = builder.CreatePointerCast(ptr, ptrToVecTy, "tovecptr");
+      return builder.CreateStore(first, ptr, "store");
+    } else if (call.getCallee() == "splat") {
+      if (call.getArgs().size() != 2) {
+        return logError("Splat requires two arguments");
+      }
+      Value* first = md::visit(*this, *call.getArgs()[0]);
+      Type* firstTy = first->getType();
+      if (!firstTy->isFloatingPointTy() && !firstTy->isIntegerTy()) {
+        return logError("Don't know how to splat type.");
+      }
+      Value* second = md::visit(*this, *call.getArgs()[1]);
+      auto* secondConst = dyn_cast<ConstantInt>(second);
+      if (!secondConst) {
+        return logError("Second argument to splat must be constant at compile time");
+      }
+      return builder.CreateVectorSplat(secondConst->getValue().getLimitedValue(), first, "splat");
+    }
+    return logError("Unknown function");
+  }
+
+  Value* operator()(BinaryOp& binop) {
+    if (binop.getOp() == '=') {
+      Variable* lhsE = dynamic_cast<Variable*>(&binop.getLHS());
+      if (!lhsE) {
+        return logError("destination of '=' must be a variable");
+      }
+      Value* rhs = md::visit(*this, binop.getRHS());
+      if (!rhs) {
+        return nullptr;
+      }
+      auto lhs = findNV(lhsE->getName());
+      if (!lhs) {
+        return logError("Unknown variable name");
+      }
+      lhs.value().get() = rhs;
+      return rhs;
+    }
+
+    Value* lhs = md::visit(*this, binop.getLHS());
+    Value* rhs = md::visit(*this, binop.getRHS());
+
+    if (!lhs || !rhs) {
+      return nullptr;
+    }
+
+    if (lhs->getType()->getScalarType()->isFloatingPointTy()) {
+      switch (binop.getOp()) {
+        case '+':
+          return builder.CreateFAdd(lhs, rhs, "addtmp");
+        case '-':
+          return builder.CreateFSub(lhs, rhs, "subtmp");
+        case '*':
+          return builder.CreateFMul(lhs, rhs, "multmp");
+        default:
+          return logError("Unknown operator");
+      }
+    }
+    switch (binop.getOp()) {
+      case '+':
+        return builder.CreateAdd(lhs, rhs, "addtmp");
+      case '-':
+        return builder.CreateSub(lhs, rhs, "subtmp");
+      case '*':
+        return builder.CreateMul(lhs, rhs, "multmp");
+      default:
+        return logError("Unknown operator");
+    }
+    return nullptr;
+  }
+
+  Value* operator()(Variable& var) {
+    auto vnv = findNV(var.getName());
+    if (!vnv) {
+      std::stringstream err;
+      err << "Variable " << var.getName() << " not declared";
+      return logError(err.str().c_str());
+    }
+    Value* v = vnv.value().get();
+    if (!v) {
+      std::stringstream err;
+      err << "Variable " << var.getName() << " not defined";
+      return logError(err.str().c_str());
+    }
     return v;
   }
 
-  return_t operator()(Block& block) {
+  Value* operator()(Number& number) {
+    Type* type = md::visit(*this, *number.getTy());
+    return ConstantInt::get(type, number.getValue());
+  }
+
+  Value* operator()(Declaration& decl) {
+    if (nv.back().find(decl.getName()) != nv.back().end()) {
+      return logError("Variable already declared in local scope");
+    }
+    nv.back()[decl.getName()] = nullptr;
+    return nullptr;
+  }
+
+  Value* operator()(Block& block) {
+    nv.push_back(ValueMap{});
     for (auto& stmt : block.getStmts()) {
       md::visit(*this, *stmt);
     } 
-    return return_t{nullptr};
+    nv.pop_back();
+    return nullptr;
   }
 
-  return_t operator()(For& forLoop) {
-    FindReadVars frv;
-    md::visit(frv, forLoop.getBody());
+  Value* operator()(For& forLoop) {
+    FindModified modfd;
+    md::visit(modfd, forLoop.getBody());
+
+    Value* start = md::visit(*this, forLoop.getStart());
 
     Function* f = builder.GetInsertBlock()->getParent();
     BasicBlock* bb = builder.GetInsertBlock();
@@ -199,27 +320,34 @@ public:
     builder.CreateBr(loopBB);
     builder.SetInsertPoint(loopBB);
 
-    PHINode* phi = builder.CreatePHI(intTy, 2, "loopvarphi");
-    phi->addIncoming(ConstantInt::get(intTy, forLoop.getStart()), bb);
-
-    std::unordered_map<std::string, std::vector<PHINode*>> phiMap;
-    for (auto& rv : frv.getVars()) {
-      if (nv.find(rv) != nv.end()) {
-        auto& vs = nv[rv];
-        phiMap[rv] = std::vector<PHINode*>{};
-        for (auto& v : vs) {
-          PHINode* phi = builder.CreatePHI(v->getType(), 2, rv.c_str());
-          phi->addIncoming(v, bb);
-          v = phi;
-          phiMap[rv].emplace_back(phi);
-        }
+    std::unordered_map<std::string, PHINode*> phiMap;
+    for (auto& mod : modfd.getVars()) {
+      auto vnv = findNV(mod);
+      if (vnv) {
+        Value*& v = vnv.value().get();
+        PHINode* phi = builder.CreatePHI(v->getType(), 2, mod.c_str());
+        phi->addIncoming(v, bb);
+        phiMap[mod] = phi;
+        v = phi;
       }
     }
 
+    auto iname = forLoop.getIname();
+    PHINode* phi = builder.CreatePHI(intTy, 2, "loopvarphi");
+    phi->addIncoming(start, bb);
+    Value* oldIname = nullptr;
+    if (nv.back().find(iname) != nv.back().end()) {
+      oldIname = nv.back().at(iname);
+    }
+    nv.back()[iname] = phi;
+
     md::visit(*this, forLoop.getBody());
-      
-    Value* nextPhi = builder.CreateAdd(phi, ConstantInt::get(intTy, forLoop.getStep()), "nextvar");
-    Value* cmp = builder.CreateICmpSLT(nextPhi, ConstantInt::get(intTy, forLoop.getStop()), "icmp");
+
+    Value* end = md::visit(*this, forLoop.getEnd());
+    Value* step = md::visit(*this, forLoop.getStep());
+
+    Value* nextPhi = builder.CreateAdd(phi, step, "nextvar");
+    Value* cmp = builder.CreateICmpSLT(nextPhi, end, "icmp");
 
     BasicBlock* loopEndBB = builder.GetInsertBlock();
     BasicBlock* afterBB = BasicBlock::Create(context, "afterloop", f);
@@ -227,18 +355,21 @@ public:
     builder.SetInsertPoint(afterBB);
     phi->addIncoming(nextPhi, loopEndBB);
 
-    for (auto& entry : phiMap) {
-      auto vit = nv[entry.first].begin();
-      for (auto& phi : entry.second) {
-        phi->addIncoming(*vit, loopEndBB);
-        ++vit;
-      }
+    if (oldIname) {
+      nv.back()[iname] = oldIname;
+    } else {
+      nv.back().erase(iname);
     }
 
-    return return_t{phi};
+    for (auto& entry : phiMap) {
+      Value* v = findNV(entry.first).value().get();
+      entry.second->addIncoming(v, loopEndBB);
+    }
+
+    return phi;
   }
 
-  return_t operator()(AnonymousFunction& function) {
+  /*return_t operator()(AnonymousFunction& function) {
     std::vector<Type*> ptrs(function.getArgs().size(), ptrToFpTy);
     FunctionType* ft = FunctionType::get(Type::getVoidTy(context), ptrs, false);
     Function* f = Function::Create(ft, Function::ExternalLinkage, "", module.get());
@@ -259,6 +390,29 @@ public:
     verifyFunction(*f);
 
     return return_t{f};
+  }*/
+  void generate(Stmt& stmt) {
+    std::vector<Type*> ptrs(3, ptrToFpTy);
+    FunctionType* ft = FunctionType::get(Type::getVoidTy(context), ptrs, false);
+    Function* f = Function::Create(ft, Function::ExternalLinkage, "", module.get());
+
+    nv.clear();
+    nv.push_back(ValueMap{});
+    std::vector<std::string> names{"A", "B", "C"};
+    auto nameIt = names.begin();
+    for (auto& arg : f->args()) {
+      arg.setName(*nameIt);
+      nv.back()[*nameIt] = &arg;
+      ++nameIt;
+    }
+
+    BasicBlock* bb = BasicBlock::Create(context, "entry", f);
+    builder.SetInsertPoint(bb);
+
+    md::visit(*this, stmt);
+
+    builder.CreateRetVoid();
+    verifyFunction(*f);
   }
 };
 

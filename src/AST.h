@@ -8,20 +8,43 @@
 
 #include <md/type.hpp>
 
-using Stmt = md::type<class Expr,
-                      class Variable,
-                      class Ptr,
-                      class Matrix,
-                      class Assign,
-                      class Block,
-                      class AnonymousFunction,
-                      class For,
-                      class Load,
-                      class Store,
-                      class Outer,
-                      class Incr>;
+#include "Type.h"
 
-class Expr : public md::with_type<Expr,Stmt> {};
+using Stmt = md::type<class Declaration,
+                      class Expr,
+                      class Variable,
+                      class Number,
+                      class BinaryOp,
+                      class Call,
+                      class Block,
+                      class For,
+                      class Fn>;
+
+class Declaration : public md::with_type<Declaration,Stmt> {
+private:
+  std::unique_ptr<Ty> type;
+  std::string name;
+
+public:
+  Declaration(std::unique_ptr<Ty> type, std::string const& name)
+    : type(std::move(type)), name(name) {
+  }
+
+  Ty const& getTy() const { return *type; }
+  std::string const& getName() const { return name; }
+};
+
+class Expr : public md::with_type<Expr,Stmt> {
+protected:
+  Ty const* type;
+
+public:
+  Expr() : type(nullptr) {}
+  Expr(Ty const* type) : type(type) {}
+
+  virtual Ty const* getTy() const { return type; }
+  virtual void setTy(Ty const* ty) { type = ty; }
+};
 
 class Variable : public md::with_type<Variable,Expr> {
 private:
@@ -35,36 +58,55 @@ public:
   std::string const& getName() const { return name; }
 };
 
-class Ptr : public md::with_type<Ptr,Variable> {
-public:
-  using md::with_type<Ptr,Variable>::with_type;
-};
-
-class Matrix : public md::with_type<Matrix,Variable> {
+class Number : public md::with_type<Number,Expr> {
 private:
-  int Mb, Nb;
+  std::unique_ptr<Ty> myTy;
+  using Expr::setTy;
+
+  int64_t value;
 
 public:
-  Matrix(std::string const& name, int Mb, int Nb)
-    : md::with_type<Matrix,Variable>(name), Mb(Mb), Nb(Nb) {
-  }
+  Number(int64_t value)
+    : myTy(std::make_unique<BasicTy>(ArTy::Int,64,false)), value(value) {}
 
-  int getMb() const { return Mb; }
-  int getNb() const { return Nb; }
+  int64_t getValue() const { return value; }
+  virtual Ty const* getTy() const { return myTy.get(); }
 };
 
-class Assign : public md::with_type<Assign,Stmt> {
+class BinaryOp : public md::with_type<BinaryOp,Expr> {
 private:
-  std::unique_ptr<Variable> lhs;
+  char op;
+  std::unique_ptr<Expr> lhs;
   std::unique_ptr<Expr> rhs;
 
 public:
-  Assign(std::unique_ptr<Variable> lhs, std::unique_ptr<Expr> rhs)
-    : lhs(std::move(lhs)), rhs(std::move(rhs)) {
+  BinaryOp(char op, std::unique_ptr<Expr> lhs, std::unique_ptr<Expr> rhs)
+    : op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
   }
 
-  Variable& getLHS() { return *lhs; }
+  char getOp() const { return op; }
+  Expr& getLHS() { return *lhs; }
   Expr& getRHS() { return *rhs; }
+
+  std::unique_ptr<Expr> transLHS() { return std::move(lhs); }
+  std::unique_ptr<Expr> transRHS() { return std::move(rhs); }
+
+  void setLHS(std::unique_ptr<Expr> newLHS) { lhs = std::move(newLHS); }
+  void setRHS(std::unique_ptr<Expr> newRHS) { rhs = std::move(newRHS); }
+};
+
+class Call : public md::with_type<Call,Expr> {
+private:
+  std::string callee;
+  std::vector<std::unique_ptr<Expr>> args;
+
+public:
+  Call(std::string const& callee, std::vector<std::unique_ptr<Expr>> args)
+    : callee(callee), args(std::move(args)) {}
+
+  auto const& getArgs() const { return args; }
+
+  std::string const& getCallee() const { return callee; }
 };
 
 class Block : public md::with_type<Block,Stmt> {
@@ -79,13 +121,13 @@ public:
   auto& getStmts() { return stmts; }
 };
 
-class AnonymousFunction : public md::with_type<AnonymousFunction,Stmt> {
+class Fn : public md::with_type<Fn,Stmt> {
 private:
   std::vector<std::string> args;
   std::unique_ptr<Stmt> body;
 
 public:
-  AnonymousFunction(std::vector<std::string> args, std::unique_ptr<Stmt> body)
+  Fn(std::vector<std::string> args, std::unique_ptr<Stmt> body)
     : args(std::move(args)), body(std::move(body)) {
   }
 
@@ -95,80 +137,28 @@ public:
 
 class For : public md::with_type<For,Stmt> {
 private:
-  int start, stop, step;
-  std::unique_ptr<Stmt> body;
+  std::string iname;
+  std::unique_ptr<Expr> start, end, step;
+  std::unique_ptr<Block> body;
 
 public:
-  For(int start, int stop, int step, std::unique_ptr<Block> body)
-    : start(start), stop(stop), step(step), body(std::move(body)) {
+  For(std::string const& iname,
+      std::unique_ptr<Expr> start,
+      std::unique_ptr<Expr> end,
+      std::unique_ptr<Expr> step,
+      std::unique_ptr<Block> body)
+    : iname(iname),
+      start(std::move(start)),
+      end(std::move(end)),
+      step(std::move(step)),
+      body(std::move(body)) {
   }
 
-  int getStart() const { return start; }
-  int getStop() const { return stop; }
-  int getStep() const { return step; }
-  Stmt& getBody() { return *body; }
-};
-
-class Load : public md::with_type<Load,Expr> {
-private:
-  std::unique_ptr<Ptr> src;
-  int Mb, Nb, ld;
-
-public:
-  Load(std::unique_ptr<Ptr> src, int Mb, int Nb, int ld)
-    : src(std::move(src)), Mb(Mb), Nb(Nb), ld(ld) {
-  }
-
-  Variable& getSrc() { return *src; }
-  int getMb() const { return Mb; }
-  int getNb() const { return Nb; }
-  int getLd() const { return ld; }
-};
-
-class Store : public md::with_type<Store,Expr> {
-private:
-  std::unique_ptr<Matrix> src;
-  std::unique_ptr<Ptr> target;
-  int ld;
-
-public:
-  Store(std::unique_ptr<Matrix> src, std::unique_ptr<Ptr> target, int ld)
-    : src(std::move(src)), target(std::move(target)), ld(ld) {
-  }
-
-  Matrix& getSrc() { return *src; }
-  Ptr& getTarget() { return *target; }
-  int getLd() const { return ld; }
-};
-
-class Outer : public md::with_type<Outer,Expr> {
-private:
-  std::unique_ptr<Matrix> a;
-  std::unique_ptr<Matrix> b;
-  std::unique_ptr<Matrix> c;
-
-public:
-  Outer(std::unique_ptr<Matrix> a, std::unique_ptr<Matrix> b, std::unique_ptr<Matrix> c) 
-    : a(std::move(a)), b(std::move(b)), c(std::move(c)) {
-  }
-
-  Matrix& getA() { return *a; }
-  Matrix& getB() { return *b; }
-  Matrix& getC() { return *c; }
-};
-
-class Incr : public md::with_type<Incr,Expr> {
-private:
-  std::unique_ptr<Variable> var;
-  int increment; 
-
-public:
-  Incr(std::unique_ptr<Variable> var, int increment) 
-    : var(std::move(var)), increment(increment) {
-  }
-
-  Variable& getVar() { return *var; }
-  int getIncr() const { return increment; }
+  std::string const& getIname() const { return iname; }
+  Expr& getStart() { return *start; }
+  Expr& getEnd() { return *end; }
+  Expr& getStep() { return *step; }
+  Block& getBody() { return *body; }
 };
 
 #endif // PSPAMM_AST_H_
