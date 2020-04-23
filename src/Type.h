@@ -1,6 +1,7 @@
 #ifndef PSPAMM_TYPE_H_
 #define PSPAMM_TYPE_H_
 
+#include <memory>
 #include <unordered_map>
 #include <md/type.hpp>
 
@@ -15,6 +16,7 @@ using TyBase = md::type<class BasicTy,
 class Ty : public TyBase {
 public:
   virtual bool isVectorTy() const { return false; }
+  virtual std::unique_ptr<Ty> clone() const = 0;
 };
 
 class BasicTy : public md::with_type<BasicTy,Ty> {
@@ -28,6 +30,9 @@ private:
 public:
   BasicTy(ArTy type, int64_t numBits, bool ptrTy)
     : type(type), numBits(numBits), ptrTy(ptrTy) {
+  }
+  std::unique_ptr<Ty> clone() const override {
+    return std::make_unique<BasicTy>(*this);
   }
 
   std::string const& getTyName() const { return ArTy2String.at(type); }
@@ -44,6 +49,9 @@ private:
 public:
   VectorTy(BasicTy basic, int64_t numElements)
     : basic(basic), numElements(numElements) {
+  }
+  std::unique_ptr<Ty> clone() const override {
+    return std::make_unique<VectorTy>(*this);
   }
 
   BasicTy const& getBasicTy() const { return basic; }

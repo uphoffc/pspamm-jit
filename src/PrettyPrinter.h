@@ -62,15 +62,13 @@ public:
   }
 
   void operator()(For& forLoop) {
-    out << "for ";
-    ++level;
+    out << "for " << forLoop.getIname() << "=";
     md::visit(*this, forLoop.getStart());
     out << ", ";
     md::visit(*this, forLoop.getEnd());
     out << ", ";
     md::visit(*this, forLoop.getStep());
     out << " ";
-    --level;
     md::visit(*this, forLoop.getBody());
   }
 

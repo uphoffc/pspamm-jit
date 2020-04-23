@@ -10,15 +10,18 @@
 
 #include "Type.h"
 
-using Stmt = md::type<class Declaration,
-                      class Expr,
-                      class Variable,
-                      class Number,
-                      class BinaryOp,
-                      class Call,
-                      class Block,
-                      class For,
-                      class Fn>;
+using StmtBase = md::type<class Declaration,
+                          class Variable,
+                          class Number,
+                          class BinaryOp,
+                          class Call,
+                          class Block,
+                          class For,
+                          class Fn>;
+class Stmt : public StmtBase {
+public:
+  virtual std::unique_ptr<Stmt> clone() const = 0;
+};
 
 class Declaration : public md::with_type<Declaration,Stmt> {
 private:
@@ -29,18 +32,25 @@ public:
   Declaration(std::unique_ptr<Ty> type, std::string const& name)
     : type(std::move(type)), name(name) {
   }
+  std::unique_ptr<Stmt> clone() const override {
+    return std::make_unique<Declaration>(type->clone(), name);
+  }
 
   Ty const& getTy() const { return *type; }
   std::string const& getName() const { return name; }
 };
 
-class Expr : public md::with_type<Expr,Stmt> {
+class Expr : public Stmt {
 protected:
   Ty const* type;
 
 public:
   Expr() : type(nullptr) {}
   Expr(Ty const* type) : type(type) {}
+  virtual std::unique_ptr<Expr> cloneExpr() const = 0;
+  std::unique_ptr<Stmt> clone() const override {
+    return cloneExpr();
+  }
 
   virtual Ty const* getTy() const { return type; }
   virtual void setTy(Ty const* ty) { type = ty; }
@@ -53,6 +63,9 @@ private:
 public:
   Variable(std::string const& name)
     : name(name) {
+  }
+  std::unique_ptr<Expr> cloneExpr() const override {
+    return std::make_unique<Variable>(*this);
   }
 
   std::string const& getName() const { return name; }
@@ -69,6 +82,13 @@ public:
   Number(int64_t value)
     : myTy(std::make_unique<BasicTy>(ArTy::Int,64,false)), value(value) {}
 
+  std::unique_ptr<Number> cloneNumber() const {
+    return std::make_unique<Number>(value);
+  }
+  std::unique_ptr<Expr> cloneExpr() const override {
+    return cloneNumber();
+  }
+
   int64_t getValue() const { return value; }
   virtual Ty const* getTy() const { return myTy.get(); }
 };
@@ -82,6 +102,11 @@ private:
 public:
   BinaryOp(char op, std::unique_ptr<Expr> lhs, std::unique_ptr<Expr> rhs)
     : op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {
+  }
+  std::unique_ptr<Expr> cloneExpr() const override {
+    return std::make_unique<BinaryOp>(op,
+                                      lhs->cloneExpr(),
+                                      rhs->cloneExpr());
   }
 
   char getOp() const { return op; }
@@ -104,7 +129,15 @@ public:
   Call(std::string const& callee, std::vector<std::unique_ptr<Expr>> args)
     : callee(callee), args(std::move(args)) {}
 
-  auto const& getArgs() const { return args; }
+  std::unique_ptr<Expr> cloneExpr() const override {
+    std::vector<std::unique_ptr<Expr>> argsClone;
+    for (auto& arg : args) {
+      argsClone.emplace_back(arg->cloneExpr());
+    }
+    return std::make_unique<Call>(callee, std::move(argsClone));
+  }
+
+  auto& getArgs() { return args; }
 
   std::string const& getCallee() const { return callee; }
 };
@@ -116,6 +149,16 @@ private:
 public:
   Block(std::vector<std::unique_ptr<Stmt>> stmts)
     : stmts(std::move(stmts)) {
+  }
+  std::unique_ptr<Block> cloneBlock() const {
+    std::vector<std::unique_ptr<Stmt>> stmtsClone;
+    for (auto& stmt : stmts) {
+      stmtsClone.emplace_back(stmt->clone());
+    }
+    return std::make_unique<Block>(std::move(stmtsClone));
+  }
+  std::unique_ptr<Stmt> clone() const override {
+    return cloneBlock();
   }
 
   auto& getStmts() { return stmts; }
@@ -129,6 +172,9 @@ private:
 public:
   Fn(std::vector<std::string> args, std::unique_ptr<Stmt> body)
     : args(std::move(args)), body(std::move(body)) {
+  }
+  std::unique_ptr<Stmt> clone() const override {
+    return std::make_unique<Fn>(args, body->clone());
   }
 
   auto& getArgs() const { return args; }
@@ -153,12 +199,26 @@ public:
       step(std::move(step)),
       body(std::move(body)) {
   }
+  std::unique_ptr<Stmt> clone() const override {
+    return std::make_unique<For>(iname,
+                                 start->cloneExpr(),
+                                 end->cloneExpr(),
+                                 step->cloneExpr(),
+                                 body->cloneBlock());
+  }
 
   std::string const& getIname() const { return iname; }
   Expr& getStart() { return *start; }
   Expr& getEnd() { return *end; }
   Expr& getStep() { return *step; }
   Block& getBody() { return *body; }
+
+  std::unique_ptr<Block> transBody() { return std::move(body); }
+
+  void setStart(std::unique_ptr<Expr> expr) { start = std::move(expr); }
+  void setEnd(std::unique_ptr<Expr> expr) { end = std::move(expr); }
+  void setStep(std::unique_ptr<Expr> expr) { step = std::move(expr); }
+  void setBody(std::unique_ptr<Block> bdy) { body = std::move(bdy); }
 };
 
 #endif // PSPAMM_AST_H_

@@ -183,7 +183,7 @@ public:
         PointerType* ptrToVecTy = PointerType::get(loadTy, 0);
         ptr = builder.CreatePointerCast(ptr, ptrToVecTy, "tovecptr");
       }
-      return builder.CreateLoad(loadTy, ptr, "load");
+      return builder.CreateAlignedLoad(loadTy, ptr, 1, "load");
     } else if (call.getCallee() == "store") {
       if (call.getArgs().size() != 3) {
         return logError("store requires three arguments");
@@ -200,7 +200,7 @@ public:
       Value* ptr = builder.CreateGEP(second, third, "getptr");
       PointerType* ptrToVecTy = PointerType::get(storeTy, 0);
       ptr = builder.CreatePointerCast(ptr, ptrToVecTy, "tovecptr");
-      return builder.CreateStore(first, ptr, "store");
+      return builder.CreateAlignedStore(first, ptr, 1, "store");
     } else if (call.getCallee() == "splat") {
       if (call.getArgs().size() != 2) {
         return logError("Splat requires two arguments");

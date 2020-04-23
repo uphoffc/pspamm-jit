@@ -3,10 +3,12 @@
 #include <md/visit.hpp>
 
 #include "Parser.h"
-//#include "ASTGenerator.h"
 #include "PrettyPrinter.h"
 #include "CodeGen.h"
 #include "visitor/CheckTypes.h"
+#include "visitor/FoldConstants.h"
+#include "visitor/Unroll.h"
+#include "visitor/Tile.h"
 
 int main() {
   std::string code(
@@ -19,11 +21,11 @@ R"(
   var ldB: i64;
   var ldC: i64;
   M = 16;
-  N = 60;
+  N = 61-1;
   K = 16;
-  ldA = 42;
-  ldB = 64;
-  ldC = 56;
+  ldA = M;
+  ldB = K;
+  ldC = M;
   for n=0,N,30 {
     for m=0,M,8 {
       var c0: <f64:8>;
@@ -282,17 +284,28 @@ R"(
 {
   var M: i64;
   var N: i64;
-  M = 32;
+  var K: i64;
+  var ldA: i64;
+  var ldB: i64;
+  var ldC: i64;
+  M = 16;
   N = 60;
-  for m=0,M,32 {
-    var a: <f64:32>;
-    a = load(A,m,32);
-    for n=0,N {
-      var b: f64;
-      var c: <f64:32>;
-      b = load(B,n,1);
-      c = a*b;
-      store(c,C,m+n*M);
+  K = 4;
+  ldA = M;
+  ldB = K;
+  ldC = M;
+  for n=0,N {
+    for m=0,M {
+      for k=0,K {
+        var a: f64;
+        var b: f64;
+        var c: f64;
+        a = load(A,m+k*ldA,1);
+        b = load(B,k+n*ldB,1);
+        c = load(C,m+n*ldC,1);
+        c = c + a*b;
+        store(c,C,m+n*ldC);
+      }
     }
   }
 }
@@ -305,6 +318,10 @@ R"(
   //auto ast = generate(16, 30, 4);
 
   md::visit(CheckTypes{}, *ast);
+  md::visit(FoldConstants{}, *ast);
+  md::visit(Tile("n", 30), *ast);
+  md::visit(Tile("m", 8), *ast);
+  md::visit(Unroll("k"), *ast);
 
   md::visit(PrettyPrinter(std::cout), *ast);
   std::cout << std::endl;
