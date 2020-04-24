@@ -38,18 +38,27 @@ public:
         return nullptr;
       }
       std::vector<std::unique_ptr<Stmt>> stmts;
+      stmts.emplace_back(std::make_unique<Declaration>(
+        start->getTy()->clone(),
+        forLoop.getIname()
+      ));
+      for (auto& arg : forLoop.getBody().getStmts()) {
+        if (md::is_type<Declaration>(arg.get())) {
+          stmts.emplace_back(arg->clone());
+        }
+      }
       for (auto i = start->getValue(); i < end->getValue(); i += step->getValue()) {
-        auto body = forLoop.getBody().cloneBlock();
-        body->getStmts().emplace(body->getStmts().begin(), std::make_unique<BinaryOp>(
+        //auto body = forLoop.getBody().cloneBlock();
+        stmts.emplace_back(std::make_unique<BinaryOp>(
           '=',
           std::make_unique<Variable>(forLoop.getIname()),
           std::make_unique<Number>(i)
         ));
-        body->getStmts().emplace(body->getStmts().begin(), std::make_unique<Declaration>(
-          start->getTy()->clone(),
-          forLoop.getIname()
-        ));
-        stmts.emplace_back(std::move(body));
+        for (auto& arg : forLoop.getBody().getStmts()) {
+          if (!md::is_type<Declaration>(arg.get())) {
+            stmts.emplace_back(arg->clone());
+          }
+        }
       }
       return std::make_unique<Block>(std::move(stmts));
     }

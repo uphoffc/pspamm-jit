@@ -5,6 +5,7 @@
 #include <utility>
 #include <string>
 #include <vector>
+#include <string_view>
 
 #include <md/type.hpp>
 
@@ -15,6 +16,9 @@ using StmtBase = md::type<class Declaration,
                           class Number,
                           class BinaryOp,
                           class Call,
+                          class Load,
+                          class Store,
+                          class Splat,
                           class Block,
                           class For,
                           class Fn>;
@@ -54,6 +58,9 @@ public:
 
   virtual Ty const* getTy() const { return type; }
   virtual void setTy(Ty const* ty) { type = ty; }
+
+  virtual bool isZero() const { return false; }
+  virtual bool isIdentity() const { return false; }
 };
 
 class Variable : public md::with_type<Variable,Expr> {
@@ -91,6 +98,9 @@ public:
 
   int64_t getValue() const { return value; }
   virtual Ty const* getTy() const { return myTy.get(); }
+
+  bool isZero() const override { return value == 0; }
+  bool isIdentity() const override { return value == 1; }
 };
 
 class BinaryOp : public md::with_type<BinaryOp,Expr> {
@@ -126,7 +136,7 @@ private:
   std::vector<std::unique_ptr<Expr>> args;
 
 public:
-  Call(std::string const& callee, std::vector<std::unique_ptr<Expr>> args)
+  Call(std::string_view callee, std::vector<std::unique_ptr<Expr>> args)
     : callee(callee), args(std::move(args)) {}
 
   std::unique_ptr<Expr> cloneExpr() const override {
@@ -140,6 +150,30 @@ public:
   auto& getArgs() { return args; }
 
   std::string const& getCallee() const { return callee; }
+};
+
+class Load : public md::with_type<Load,Call> {
+public:
+  static constexpr auto Callee = std::string_view("load");
+
+  Load(std::vector<std::unique_ptr<Expr>> args)
+    : md::with_type<Load,Call>(Callee, std::move(args)) {}
+};
+
+class Store : public md::with_type<Store,Call> {
+public:
+  static constexpr auto Callee = std::string_view("store");
+
+  Store(std::vector<std::unique_ptr<Expr>> args)
+    : md::with_type<Store,Call>(Callee, std::move(args)) {}
+};
+
+class Splat : public md::with_type<Splat,Call> {
+public:
+  static constexpr auto Callee = std::string_view("splat");
+
+  Splat(std::vector<std::unique_ptr<Expr>> args)
+    : md::with_type<Splat,Call>(Callee, std::move(args)) {}
 };
 
 class Block : public md::with_type<Block,Stmt> {
@@ -199,12 +233,19 @@ public:
       step(std::move(step)),
       body(std::move(body)) {
   }
-  std::unique_ptr<Stmt> clone() const override {
+  std::unique_ptr<For> cloneFor() const {
+    std::unique_ptr<Block> clonedBody;
+    if (body) {
+      clonedBody = body->cloneBlock();
+    }
     return std::make_unique<For>(iname,
                                  start->cloneExpr(),
                                  end->cloneExpr(),
                                  step->cloneExpr(),
-                                 body->cloneBlock());
+                                 std::move(clonedBody));
+  }
+  std::unique_ptr<Stmt> clone() const override {
+    return cloneFor();
   }
 
   std::string const& getIname() const { return iname; }

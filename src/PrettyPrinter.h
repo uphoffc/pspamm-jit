@@ -2,6 +2,7 @@
 #define PSPAMM_PRETTYPRINTER_H_
 
 #include <ostream>
+#include <iostream>
 #include <string>
 
 #include "AST.h"
@@ -16,7 +17,7 @@ private:
   }
 
 public:
-  PrettyPrinter(std::ostream& out)
+  PrettyPrinter(std::ostream& out = std::cout)
     : out(out) {}
 
   void operator()(Stmt&) {}
@@ -42,11 +43,16 @@ public:
   }
 
   void operator()(BinaryOp& op) {
-    out << "(";
+    bool printParen = op.getOp() == '+' || op.getOp() == '-';
+    if (printParen) {
+      out << "(";
+    }
     md::visit(*this, op.getLHS());
     out << " " << op.getOp() << " ";
     md::visit(*this, op.getRHS());
-    out << ")";
+    if (printParen) {
+      out << ")";
+    }
   }
 
   void operator()(Block& block) {

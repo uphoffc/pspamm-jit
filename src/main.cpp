@@ -9,6 +9,8 @@
 #include "visitor/FoldConstants.h"
 #include "visitor/Unroll.h"
 #include "visitor/Tile.h"
+#include "visitor/MoveLoop.h"
+#include "visitor/Vectorize.h"
 
 int main() {
   std::string code(
@@ -288,8 +290,8 @@ R"(
   var ldA: i64;
   var ldB: i64;
   var ldC: i64;
-  M = 16;
-  N = 60;
+  M = 17;
+  N = 61;
   K = 4;
   ldA = M;
   ldB = K;
@@ -320,8 +322,11 @@ R"(
   md::visit(CheckTypes{}, *ast);
   md::visit(FoldConstants{}, *ast);
   md::visit(Tile("n", 30), *ast);
+  md::visit(MoveLoop("n"), *ast);
   md::visit(Tile("m", 8), *ast);
-  md::visit(Unroll("k"), *ast);
+  md::visit(MoveLoop("m"), *ast);
+  md::visit(Vectorize("m"), *ast);
+  //md::visit(Unroll("n"), *ast);
 
   md::visit(PrettyPrinter(std::cout), *ast);
   std::cout << std::endl;

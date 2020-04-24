@@ -86,6 +86,16 @@ std::unique_ptr<Expr> Parser::parseIdentifierExpr() {
   }
   getNextToken(); // skip ')'
 
+  if (identifier == Load::Callee) {
+    return std::make_unique<Load>(std::move(args));
+  }
+  if (identifier == Store::Callee) {
+    return std::make_unique<Store>(std::move(args));
+  }
+  if (identifier == Splat::Callee) {
+    return std::make_unique<Splat>(std::move(args));
+  }
+
   return std::make_unique<Call>(identifier, std::move(args));
 }
 
