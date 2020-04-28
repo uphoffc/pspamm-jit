@@ -22,14 +22,21 @@ public:
     for (auto& stmt : block.getStmts()) {
       auto newStmt = md::visit(*this, *stmt);
       if (newStmt) {
-        stmt = std::move(newStmt);
+        if (block.getStmts().size() == 1) {
+          return std::move(newStmt);
+        } else {
+          stmt = std::move(newStmt);
+        }
       }
     }
     return nullptr;
   }
 
   std::unique_ptr<Block> operator()(For& forLoop) {
-    md::visit(*this, forLoop.getBody());
+    auto newBody = md::visit(*this, forLoop.getBody());
+    if (newBody) {
+      forLoop.setBody(std::move(newBody));
+    }
 
     if (iname == forLoop.getIname()) {
       auto start = dynamic_cast<Number const*>(&forLoop.getStart());

@@ -290,8 +290,8 @@ R"(
   var ldA: i64;
   var ldB: i64;
   var ldC: i64;
-  M = 16;
-  N = 60;
+  M = 17;
+  N = 61;
   K = 4;
   ldA = M;
   ldB = K;

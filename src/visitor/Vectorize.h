@@ -11,7 +11,7 @@
 
 class Vectorize {
 private:
-  using return_t = std::unique_ptr<Stmt>;
+  using return_t = std::unique_ptr<Block>;
   std::string iname;
 
 public:
@@ -24,13 +24,22 @@ public:
     for (auto& stmt : block.getStmts()) {
       auto newStmt = md::visit(*this, *stmt);
       if (newStmt) {
-        stmt = std::move(newStmt);
+        if (block.getStmts().size() == 1) {
+          return std::move(newStmt);
+        } else {
+          stmt = std::move(newStmt);
+        }
       }
     }
     return nullptr;
   }
 
   return_t operator()(For& forLoop) {
+    auto newBody = md::visit(*this, forLoop.getBody());
+    if (newBody) {
+      forLoop.setBody(std::move(newBody));
+    }
+
     if (forLoop.getIname() == iname) {
       auto start = dynamic_cast<Number const*>(&forLoop.getStart());
       auto end = dynamic_cast<Number const*>(&forLoop.getEnd());
@@ -53,7 +62,6 @@ public:
       md::visit(CheckTypes{}, *newBlock);
       return std::move(newBlock);
     }
-    md::visit(*this, forLoop.getBody());
     return nullptr;
   }
 };
