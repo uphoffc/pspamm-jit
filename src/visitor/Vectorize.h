@@ -5,9 +5,9 @@
 #include <memory>
 #include <md/visit.hpp>
 #include "AST.h"
-#include "Derivative.h"
-#include "SimplifyExpr.h"
-#include "PrettyPrinter.h"
+#include "VectorizeExpr.h"
+#include "CheckTypes.h"
+#include "Subs.h"
 
 class Vectorize {
 private:
@@ -22,29 +22,37 @@ public:
 
   return_t operator()(Block& block) {
     for (auto& stmt : block.getStmts()) {
-      md::visit(*this, *stmt);
+      auto newStmt = md::visit(*this, *stmt);
+      if (newStmt) {
+        stmt = std::move(newStmt);
+      }
     }
     return nullptr;
   }
 
   return_t operator()(For& forLoop) {
     if (forLoop.getIname() == iname) {
-      std::vector<std::unique_ptr<Stmt>> stmts;
-      for (auto& stmt : forLoop.getBody().getStmts()) {
-        auto der = md::visit(Derivative(iname), *stmt);
-        if (der) {
-          auto derSimple = md::visit(SimplifyExpr{}, *der);
-          md::visit(PrettyPrinter{}, *stmt);
-          std::cout << std::endl;
-          md::visit(PrettyPrinter{}, *derSimple);
-          std::cout << std::endl << std::endl;
-        }
+      auto start = dynamic_cast<Number const*>(&forLoop.getStart());
+      auto end = dynamic_cast<Number const*>(&forLoop.getEnd());
+      auto step = dynamic_cast<Number const*>(&forLoop.getStep());
+      if (!start || !end || !step) {
+        std::cerr << "Can only vectorize loops with constant limits" << std::endl;
+        return nullptr;
       }
-
-      //forLoop.setBody(std::make_unique<Block>(std::move(stmts)));
-      return nullptr;
+      if (end->getValue() - start->getValue() <= 1) {
+        return nullptr;
+      }
+      if (step->getValue() != 1) {
+        std::cerr << "Step must be one" << std::endl;
+        return nullptr;
+      }
+      auto tripCount = end->getValue() - start->getValue();
+      auto newBody = md::visit(VectorizeExpr(iname, tripCount), forLoop.getBody());
+      std::unique_ptr<Block> newBlock(static_cast<Block*>(newBody.release()));
+      md::visit(Subs(iname, *start), *newBlock);
+      md::visit(CheckTypes{}, *newBlock);
+      return std::move(newBlock);
     }
-
     md::visit(*this, forLoop.getBody());
     return nullptr;
   }

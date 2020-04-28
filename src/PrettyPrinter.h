@@ -84,12 +84,24 @@ public:
   }
 
   void operator()(Call& call) {
-    out << call.getCallee() << "(";
-    for (auto& arg : call.getArgs()) {
-      md::visit(*this, *arg);
-      out << ",";
+    out << call.getCallee();
+    if (call.getTArgs().size() > 0) {
+      out << "<";
+      for (auto& tArg : call.getTArgs()) {
+        out << tArg << ",";
+      }
+      out << "\b>";
     }
-    out << ")";
+    if (call.getArgs().size() > 0) {
+      out << "(";
+      for (auto& arg : call.getArgs()) {
+        md::visit(*this, *arg);
+        out << ",";
+      }
+      out << "\b)";
+    } else {
+      out << "()";
+    }
   }
 };
 

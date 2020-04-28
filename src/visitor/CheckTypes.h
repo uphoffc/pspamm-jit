@@ -69,8 +69,7 @@ public:
     auto splat = [](std::unique_ptr<Expr> expr, int64_t vl) {
       std::vector<std::unique_ptr<Expr>> args;
       args.emplace_back(std::move(expr));
-      args.emplace_back(std::make_unique<Number>(vl));
-      return std::make_unique<Call>("splat", std::move(args));
+      return std::make_unique<Call>("splat", std::move(args), std::vector<int64_t>{vl});
     };
     if (common->isVectorTy()) {
       if (!lhs->isVectorTy()) {

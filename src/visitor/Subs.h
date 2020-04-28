@@ -14,11 +14,11 @@ private:
   std::vector<DeclSet> values;
 
   std::string varName;
-  std::unique_ptr<Expr> by;
+  Expr const& by;
 
 public:
-  Subs(std::string const& varName, std::unique_ptr<Expr> by)
-    : varName(varName), by(std::move(by)) {}
+  Subs(std::string const& varName, Expr const& by)
+    : varName(varName), by(by) {}
 
   return_t operator()(Stmt& stmt) {
     return nullptr;
@@ -38,7 +38,7 @@ public:
         return nullptr;
       }
     }
-    return by->cloneExpr();
+    return by.cloneExpr();
   }
 
   return_t operator()(BinaryOp& op) {

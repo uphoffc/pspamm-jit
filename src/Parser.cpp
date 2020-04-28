@@ -59,8 +59,32 @@ std::unique_ptr<Expr> Parser::parseIdentifierExpr() {
   getNextToken(); // skip identifier
 
   // Variable
-  if (curTok != '(' && curTok != '[') {
+  if (curTok != '(' && curTok != '<') {
     return std::make_unique<Variable>(identifier);
+  }
+
+  std::vector<int64_t> tArgs;
+  if (curTok == '<') {
+    getNextToken(); // skip '<'
+    while (true) {
+      if (curTok == tok_number) {
+        tArgs.push_back(lexer.getNumber());
+      } else {
+        return logError<Expr>("Expected number");
+      }
+      getNextToken();
+      if (curTok == '>') {
+        break;
+      }
+      if (curTok != ',') {
+        return logError<Expr>("Expected '>' or ',' in argument list");
+      }
+      getNextToken();
+    }
+    getNextToken(); // skip '>'
+  }
+  if (curTok != '(') {
+    return logError<Expr>("Expected '('");
   }
 
   // Function call
@@ -86,17 +110,7 @@ std::unique_ptr<Expr> Parser::parseIdentifierExpr() {
   }
   getNextToken(); // skip ')'
 
-  if (identifier == Load::Callee) {
-    return std::make_unique<Load>(std::move(args));
-  }
-  if (identifier == Store::Callee) {
-    return std::make_unique<Store>(std::move(args));
-  }
-  if (identifier == Splat::Callee) {
-    return std::make_unique<Splat>(std::move(args));
-  }
-
-  return std::make_unique<Call>(identifier, std::move(args));
+  return std::make_unique<Call>(identifier, std::move(args), std::move(tArgs));
 }
 
 std::unique_ptr<Expr> Parser::parsePrimary() {

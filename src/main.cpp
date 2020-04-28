@@ -290,8 +290,8 @@ R"(
   var ldA: i64;
   var ldB: i64;
   var ldC: i64;
-  M = 17;
-  N = 61;
+  M = 16;
+  N = 60;
   K = 4;
   ldA = M;
   ldB = K;
@@ -302,9 +302,9 @@ R"(
         var a: f64;
         var b: f64;
         var c: f64;
-        a = load(A,m+k*ldA,1);
-        b = load(B,k+n*ldB,1);
-        c = load(C,m+n*ldC,1);
+        a = load<1>(A,m+k*ldA);
+        b = load<1>(B,k+n*ldB);
+        c = load<1>(C,m+n*ldC);
         c = c + a*b;
         store(c,C,m+n*ldC);
       }
@@ -323,10 +323,10 @@ R"(
   md::visit(FoldConstants{}, *ast);
   md::visit(Tile("n", 30), *ast);
   md::visit(MoveLoop("n"), *ast);
-  md::visit(Tile("m", 8), *ast);
+  md::visit(Tile("m", 8, true), *ast);
   md::visit(MoveLoop("m"), *ast);
   md::visit(Vectorize("m"), *ast);
-  //md::visit(Unroll("n"), *ast);
+  md::visit(Unroll("n"), *ast);
 
   md::visit(PrettyPrinter(std::cout), *ast);
   std::cout << std::endl;

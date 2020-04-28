@@ -2,6 +2,7 @@
 #define PSPAMM_VISITOR_TILE_H_
 
 #include <cstdint>
+#include <algorithm>
 #include "AST.h"
 #include "Subs.h"
 
@@ -9,10 +10,11 @@ class Tile {
 private:
   std::string iname;
   int64_t maxTripCount;
+  bool maximise;
 
 public:
-  Tile(std::string const& iname, int64_t maxTripCount)
-    : iname(iname), maxTripCount(maxTripCount) {}
+  Tile(std::string const& iname, int64_t maxTripCount, bool maximise = false)
+    : iname(iname), maxTripCount(maxTripCount), maximise(maximise) {}
 
   std::unique_ptr<Block> operator()(Stmt& stmt) { return nullptr; }
 
@@ -41,13 +43,19 @@ public:
       if (tripCount <= maxTripCount || tripCount <= 0 || tripCount % step->getValue() != 0) {
         return nullptr;
       }
-      auto numTiles = 1 + (tripCount-1) / maxTripCount;
-      int64_t newTripCount[]{
-        1 + (tripCount-1) / numTiles,
-        tripCount / numTiles
-      };
-      auto repeat1 = tripCount % newTripCount[1];
-      auto repeat2 = (tripCount - repeat1 * newTripCount[0]) / newTripCount[1];
+      int64_t repeat1, repeat2, newTripCount[2];
+      if (maximise) {
+        newTripCount[0] = std::min(maxTripCount, tripCount);
+        repeat1 = tripCount / newTripCount[0];
+        repeat2 = 1;
+        newTripCount[1] = tripCount - repeat1*newTripCount[0];
+      } else {
+        auto numTiles = 1 + (tripCount-1) / maxTripCount;
+        newTripCount[0] = 1 + (tripCount-1) / numTiles;
+        newTripCount[1] = tripCount / numTiles;
+        repeat1 = tripCount % newTripCount[1];
+        repeat2 = (tripCount - repeat1 * newTripCount[0]) / newTripCount[1];
+      }
       std::vector<std::unique_ptr<Stmt>> stmts;
       auto addTile = [&](std::string&& newIname,
                          int64_t newTripCount,
@@ -59,7 +67,7 @@ public:
           std::string innerIname(forLoop.getIname());
           auto body = forLoop.getBody().cloneBlock();
           md::visit(Subs(forLoop.getIname(), 
-            std::make_unique<BinaryOp>('+',
+            BinaryOp('+',
               std::make_unique<Variable>(newIname),
               std::make_unique<Variable>(innerIname)
             )), *body);

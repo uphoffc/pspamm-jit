@@ -159,22 +159,17 @@ public:
 
   Value* operator()(Call& call) {
     if (call.getCallee() == "load") {
-      if (call.getArgs().size() != 3) {
-        return logError("Load requires three arguments");
+      if (call.getArgs().size() != 2) {
+        return logError("Load requires two arguments");
       }
       Value* first = md::visit(*this, *call.getArgs()[0]);
       Value* second = md::visit(*this, *call.getArgs()[1]);
-      Value* third = md::visit(*this, *call.getArgs()[2]);
       auto* firstPtr = dyn_cast<PointerType>(first->getType());
       if (!firstPtr) {
         return logError("First argument to load must be pointer");
       }
-      auto* thirdConst = dyn_cast<ConstantInt>(third);
-      if (!thirdConst) {
-        return logError("Third argument to load must be constant at compile time");
-      }
 
-      uint64_t vl = thirdConst->getValue().getLimitedValue();
+      auto vl = call.getTArgs()[0];
       Type* loadTy = firstPtr->getElementType();
 
       Value* ptr = builder.CreateGEP(first, second, "getptr");
@@ -202,20 +197,16 @@ public:
       ptr = builder.CreatePointerCast(ptr, ptrToVecTy, "tovecptr");
       return builder.CreateAlignedStore(first, ptr, 1, "store");
     } else if (call.getCallee() == "splat") {
-      if (call.getArgs().size() != 2) {
-        return logError("Splat requires two arguments");
+      if (call.getArgs().size() != 1) {
+        return logError("Splat requires one argument");
       }
       Value* first = md::visit(*this, *call.getArgs()[0]);
       Type* firstTy = first->getType();
       if (!firstTy->isFloatingPointTy() && !firstTy->isIntegerTy()) {
         return logError("Don't know how to splat type.");
       }
-      Value* second = md::visit(*this, *call.getArgs()[1]);
-      auto* secondConst = dyn_cast<ConstantInt>(second);
-      if (!secondConst) {
-        return logError("Second argument to splat must be constant at compile time");
-      }
-      return builder.CreateVectorSplat(secondConst->getValue().getLimitedValue(), first, "splat");
+      auto vl = call.getTArgs()[0];
+      return builder.CreateVectorSplat(vl, first, "splat");
     }
     return logError("Unknown function");
   }
